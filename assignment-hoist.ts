@@ -365,64 +365,64 @@ function main() {
         opt_result
     );
 
-    traverse.default(
-        program_ast,
-        {
-            ExpressionStatement(path, state) {
-                const _expression = path.get('expression');
+    // traverse.default(
+    //     program_ast,
+    //     {
+    //         ExpressionStatement(path, state) {
+    //             const _expression = path.get('expression');
 
-                const assignment_paths: traverse.NodePath<types.AssignmentExpression>[] = [];
-                path.traverse({
-                    AssignmentExpression(path) {
-                        if (path.node != _expression.node) {
-                            assignment_paths.push(path);
-                        }
-                    },
-                    ConditionalExpression(path) {
-                        const _test = path.get('test');
-                        if (_test.isAssignmentExpression()) {
-                            assignment_paths.push(_test);
-                        }
+    //             const assignment_paths: traverse.NodePath<types.AssignmentExpression>[] = [];
+    //             path.traverse({
+    //                 AssignmentExpression(path) {
+    //                     if (path.node != _expression.node) {
+    //                         assignment_paths.push(path);
+    //                     }
+    //                 },
+    //                 ConditionalExpression(path) {
+    //                     const _test = path.get('test');
+    //                     if (_test.isAssignmentExpression()) {
+    //                         assignment_paths.push(_test);
+    //                     }
 
-                        // @ts-ignore
-                        _test.traverse(this, state);
+    //                     // @ts-ignore
+    //                     _test.traverse(this, state);
 
-                        path.skip();
-                    },
-                    LogicalExpression(path) {
-                        const _left = path.get('left');
-                        if (_left.isAssignmentExpression()) {
-                            assignment_paths.push(_left);
-                        }
+    //                     path.skip();
+    //                 },
+    //                 LogicalExpression(path) {
+    //                     const _left = path.get('left');
+    //                     if (_left.isAssignmentExpression()) {
+    //                         assignment_paths.push(_left);
+    //                     }
 
-                        // @ts-ignore
-                        _left.traverse(this, state);
+    //                     // @ts-ignore
+    //                     _left.traverse(this, state);
 
-                        path.skip();
-                    },
-                    SequenceExpression(path) {
-                        path.skip();
-                    },
-                    FunctionExpression(path) {
-                        path.skip();
-                    }
-                });
-                if (assignment_paths.length > 0) {
-                    const assignment_exprs: types.AssignmentExpression[] = [];
-                    const new_expression = hoistAssignmentExpression(path.get('expression'), assignment_paths, assignment_exprs) as typeof path.node;
-                    assert.ok(assignment_exprs.length > 0);
-                    //assert.ok(types.isCallExpression(new_expression));
+    //                     path.skip();
+    //                 },
+    //                 SequenceExpression(path) {
+    //                     path.skip();
+    //                 },
+    //                 FunctionExpression(path) {
+    //                     path.skip();
+    //                 }
+    //             });
+    //             if (assignment_paths.length > 0) {
+    //                 const assignment_exprs: types.AssignmentExpression[] = [];
+    //                 const new_expression = hoistAssignmentExpression(path.get('expression'), assignment_paths, assignment_exprs) as typeof path.node;
+    //                 assert.ok(assignment_exprs.length > 0);
+    //                 //assert.ok(types.isCallExpression(new_expression));
 
-                    assignment_exprs.forEach(e => path.insertBefore(types.expressionStatement(e)));
-                    path.get('expression').replaceWith(new_expression);
+    //                 assignment_exprs.forEach(e => path.insertBefore(types.expressionStatement(e)));
+    //                 path.get('expression').replaceWith(new_expression);
 
-                    ++state.count_in_others;
-                }
-            }
-        },
-        undefined,
-        opt_result
-    );
+    //                 ++state.count_in_others;
+    //             }
+    //         }
+    //     },
+    //     undefined,
+    //     opt_result
+    // );
 
     // traverse.default(
     //     program_ast,
