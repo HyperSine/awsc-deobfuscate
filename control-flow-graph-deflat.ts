@@ -1,16 +1,16 @@
 import * as assert from 'node:assert';
+import * as fs from "node:fs";
 import * as readline from 'node:readline';
 
 import * as deasync from 'deasync';
 import * as argparse from 'argparse';
 
 import * as types from '@babel/types';
+import * as parser from "@babel/parser";
 import * as traverse from '@babel/traverse';
 import * as generator from '@babel/generator';
 
 import * as z3js from './z3js';
-import * as parser from "@babel/parser";
-import fs from "node:fs";
 
 const Z3Context = new z3js.Context();
 

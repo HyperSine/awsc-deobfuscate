@@ -3,8 +3,7 @@
     "@babel/core": "^7.22.9",
     "argparse": "^2.0.1",
     "deasync": "^0.1.28",
-    "ffi-napi": "^4.0.3",
-    "log-update": "^5.0.1"
+    "ffi-napi": "^4.0.3"
   },
   "devDependencies": {
     "@types/argparse": "^2.0.10",
