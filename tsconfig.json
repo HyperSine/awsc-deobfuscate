@@ -109,7 +109,8 @@
   "include": [
       "z3js/ffi.ts",
       "z3js/index.ts",
-      
+
+      "if-body-normalize.ts",
       "void-unary-expression-unwrap.ts",
       "assignment-hoist.ts",
 
@@ -117,8 +118,10 @@
       "seq-expr-assign-addassign-str-literals-fold.ts",
       "seq-expr-assign-split_reverse_join-str-literals-fold.ts",
 
-      "control-flow-graph-deflat.ts"
+      "control-flow-graph-deflat.ts",
 
+      "void-unary-expression-to-undefined.ts",
+      "contextual-simplify.ts",
       // "expr-stmts-addassign-str-literals-fold.ts",
       //"test0.ts"
       //"test2.ts"
