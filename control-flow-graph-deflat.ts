@@ -1184,7 +1184,7 @@ class CfgRecovery {
     }
 
     private searchIfConverge(cond_node: DeflatBlock, contexts: CfgRecoveryContext[]): DeflatBlock | undefined {
-        const succ_nodes = cond_node.getGraph().getSuccessors(cond_node);
+        const succ_nodes = this.graph.getSuccessors(cond_node);
         assert.ok(succ_nodes.length === 2);
         assert.ok(cond_node != succ_nodes[0] && cond_node != succ_nodes[1]);
 
@@ -1213,18 +1213,30 @@ class CfgRecovery {
                 break;
             }
 
-            left_visitable_nodes.forEach(n => left_visited_nodes.add(n));
-            right_visitable_nodes.forEach(n => right_visited_nodes.add(n));
+            let common_visited_nodes;
 
-            const common_visited_nodes = new Set([...left_visited_nodes].filter(n => right_visited_nodes.has(n)));
+            left_visitable_nodes.forEach(n => left_visited_nodes.add(n));
+            common_visited_nodes = new Set([...left_visited_nodes].filter(n => right_visited_nodes.has(n)));
             if (common_visited_nodes.size === 0) {
-                left_broadcast_nodes = this.searchIfConvergeBroadcast(left_visitable_nodes, left_visited_nodes, i, cond_node, contexts)
-                right_broadcast_nodes = this.searchIfConvergeBroadcast(right_visitable_nodes, right_visited_nodes, i, cond_node, contexts)
+                // pass
             } else if (common_visited_nodes.size === 1) {
                 return common_visited_nodes.values().next().value;
             } else {
                 throw new Error('multiple converge nodes, cfg may be ill-formed.');
             }
+
+            right_visitable_nodes.forEach(n => right_visited_nodes.add(n));
+            common_visited_nodes = new Set([...left_visited_nodes].filter(n => right_visited_nodes.has(n)));
+            if (common_visited_nodes.size === 0) {
+                // pass
+            } else if (common_visited_nodes.size === 1) {
+                return common_visited_nodes.values().next().value;
+            } else {
+                throw new Error('multiple converge nodes, cfg may be ill-formed.');
+            }
+
+            left_broadcast_nodes = this.searchIfConvergeBroadcast(left_visitable_nodes, left_visited_nodes, i, cond_node, contexts);
+            right_broadcast_nodes = this.searchIfConvergeBroadcast(right_visitable_nodes, right_visited_nodes, i, cond_node, contexts);
         }
 
         return undefined;
@@ -1268,12 +1280,69 @@ class CfgRecovery {
         const new_broadcast = new Set<DeflatBlock>();
         for (let node of nodes) {
             if (this.searchIfConvergeIsNodeBroadcastable(node, iteration, cond_node, contexts)) {
-                node.getGraph().getSuccessors(node)
+                this.graph.getSuccessors(node)
                     .filter(n => !visited_nodes.has(n))
                     .forEach(n => new_broadcast.add(n));
             }
         }
         return new_broadcast;
+    }
+
+    private forwardTraverse(node: DeflatBlock, target_node: DeflatBlock, visit_path: DeflatBlock[], reachable_prefix: number, skip_nodes: Set<DeflatBlock>, reachable_nodes: Set<DeflatBlock>, contexts: CfgRecoveryContext[]) {
+        if (node === target_node || reachable_nodes.has(node)) {
+            visit_path.slice(reachable_prefix).forEach(n => reachable_nodes.add(n));
+            return true;
+        } else if (visit_path.indexOf(node) >= 0 || reachable_nodes.size === 0 && skip_nodes.has(node)) {
+            return false;
+        } else {
+            if (contexts.length > 0) {
+                const last_context = contexts.at(-1)!;
+                switch (last_context.type) {
+                    case 'if':
+                        if (!last_context.nodes.has(node) || node === last_context.converge_node) {
+                            return false;
+                        }
+                        break;
+                    case 'if-escape':
+                        if (!last_context.nodes.has(node)) {
+                            return false;
+                        }
+                        break;
+                    case 'loop':
+                        if (!last_context.nodes.has(node) || node === last_context.continue_node) {
+                            return false;
+                        }
+                        break;
+                }
+            }
+
+            let reachable = false;
+            const revisit_succ_nodes: DeflatBlock[] = [];
+
+            visit_path.push(node);
+            for (let succ_node of this.graph.getSuccessors(node)) {
+                if (reachable) {
+                    this.forwardTraverse(succ_node, target_node, visit_path, reachable_prefix, skip_nodes, reachable_nodes, contexts);
+                } else {
+                    if (this.forwardTraverse(succ_node, target_node, visit_path, reachable_prefix, skip_nodes, reachable_nodes, contexts)) {
+                        reachable = true;
+                        reachable_prefix = visit_path.length;
+                        for (let n of revisit_succ_nodes) {
+                            this.forwardTraverse(n, target_node, visit_path, reachable_prefix, skip_nodes, reachable_nodes, contexts)
+                        }
+                    } else {
+                        revisit_succ_nodes.push(succ_node);
+                    }
+                }
+            }
+            visit_path.pop();
+
+            if (!reachable) {
+                skip_nodes.add(node);
+            }
+
+            return reachable;
+        }
     }
 
     private backwardTraverse(node: DeflatBlock, target_node: DeflatBlock, visit_path: DeflatBlock[], reachable_prefix: number, reachable_nodes: Set<DeflatBlock>, contexts: CfgRecoveryContext[]) {
@@ -1308,7 +1377,7 @@ class CfgRecovery {
             const revisit_pred_nodes: DeflatBlock[] = [];
 
             visit_path.push(node);
-            for (let pred_node of node.getGraph().getPredecessors(node)) {
+            for (let pred_node of this.graph.getPredecessors(node)) {
                 if (reachable) {
                     this.backwardTraverse(pred_node, target_node, visit_path, reachable_prefix, reachable_nodes, contexts);
                 } else {
@@ -1331,15 +1400,15 @@ class CfgRecovery {
         const if_nodes = new Set<DeflatBlock>();
 
         let reachable = false;
-        for (let pred_node of converge_node.getGraph().getPredecessors(converge_node)) {
-            if (this.backwardTraverse(pred_node, cond_node, [], 0, if_nodes, contexts)) {
+        for (let succ_node of this.graph.getSuccessors(cond_node)) {
+            if (this.forwardTraverse(succ_node, converge_node, [], 0, new Set(), if_nodes, contexts)) {
                 reachable = true;
             }
         }
         if (!reachable) {
-            const cond_index = cond_node.getGraph().deflat_blocks.indexOf(cond_node);
-            const converge_index = converge_node.getGraph().deflat_blocks.indexOf(converge_node);
-            throw new Error(`the If converge_node ${converge_index} is not backward reachable to the If cond_node ${cond_index}, cfg may be ill-formed.`);
+            const cond_index = this.graph.deflat_blocks.indexOf(cond_node);
+            const converge_index = this.graph.deflat_blocks.indexOf(converge_node);
+            throw new Error(`the If cond_node ${cond_index} is not forward reachable to the If converge_node ${converge_index}, cfg may be ill-formed.`);
         }
 
         return if_nodes;
@@ -1396,7 +1465,7 @@ class CfgRecovery {
             reachable_nodes.add(node);
 
             visit_path.push(node);
-            for (let succ_node of node.getGraph().getSuccessors(node)) {
+            for (let succ_node of this.graph.getSuccessors(node)) {
                 if (visit_path.indexOf(succ_node) >= 0 || reachable_nodes.has(succ_node)) {
                     // pass
                 } else {
@@ -1414,7 +1483,7 @@ class CfgRecovery {
             if (this.backwardTraverse(pred_node, loopin_node, [], 0, loop_nodes, contexts)) {
                 // pass
             } else {
-                const loopin_index = loopin_node.getGraph().deflat_blocks.indexOf(loopin_node);
+                const loopin_index = this.graph.deflat_blocks.indexOf(loopin_node);
                 throw new Error(`some pred nodes of ${loopin_index} are not a part of loop body, cfg may be ill-formed.`);
             }
         }
@@ -1448,7 +1517,7 @@ class CfgRecovery {
             const nodes = [];
 
             for (let loopout_node of loopout_nodes) {
-                if (loopout_node.getGraph().getPredecessors(loopout_node).length > 1) {
+                if (this.graph.getPredecessors(loopout_node).length > 1) {
                     nodes.push(loopout_node);
                 }
             }
@@ -1469,7 +1538,7 @@ class CfgRecovery {
         }
 
         if (loop_nodes.has(node)) {
-            for (let succ_node of node.getGraph().getSuccessors(node)) {
+            for (let succ_node of this.graph.getSuccessors(node)) {
                 this.searchLoopoutNodesDfs(succ_node, loop_nodes, visited_nodes, loopout_nodes);
             }
         } else {
@@ -1517,8 +1586,8 @@ main_loop: while (true) {
                 }
             }
 
-            const pred_nodes = current_node.getGraph().getPredecessors(current_node);
-            const succ_nodes = current_node.getGraph().getSuccessors(current_node);
+            const pred_nodes = this.graph.getPredecessors(current_node);
+            const succ_nodes = this.graph.getSuccessors(current_node);
 
             const proper_pred_nodes: DeflatBlock[] = [];
             do {
@@ -1567,7 +1636,7 @@ main_loop: while (true) {
                                     const true_in_if = last_context.nodes.has(succ_nodes[0]) || succ_nodes[0] == last_context.converge_node;
                                     const false_in_if = last_context.nodes.has(succ_nodes[1]) || succ_nodes[1] == last_context.converge_node;
 
-                                    assert.ok(true_in_if != false_in_if);
+                                    assert.ok(true_in_if !== false_in_if);
 
                                     {
                                         const { nodes: if_escape_nodes, exit_map: if_escape_exit_map } = this.traverseIfEscape(false_in_if ? succ_nodes[0] : succ_nodes[1], contexts);
@@ -1584,7 +1653,7 @@ main_loop: while (true) {
                                     const true_in_loop = last_context.nodes.has(succ_nodes[0]);
                                     const false_in_loop = last_context.nodes.has(succ_nodes[1]);
 
-                                    assert.ok(true_in_loop != false_in_loop);
+                                    assert.ok(true_in_loop !== false_in_loop);
 
                                     {
                                         const { nodes: if_escape_nodes, exit_map: if_escape_exit_map } = this.traverseIfEscape(false_in_loop ? succ_nodes[0] : succ_nodes[1], contexts);
@@ -1635,7 +1704,7 @@ main_loop: while (true) {
     }
 
     private buildIf(nodes: Set<DeflatBlock>, cond_node: DeflatBlock, converge_node: DeflatBlock, contexts: CfgRecoveryContext[]) {
-        const succ_nodes = cond_node.getGraph().getSuccessors(cond_node);
+        const succ_nodes = this.graph.getSuccessors(cond_node);
         assert.ok(succ_nodes.length === 2);
 
         this.markEdgeAsVisited(cond_node, succ_nodes[0]);
@@ -1664,7 +1733,7 @@ main_loop: while (true) {
     }
 
     private buildIfEscape(nodes: Set<DeflatBlock>, cond_node: DeflatBlock, escape_cond: boolean, exit_map: Map<DeflatBlock, [string, number]>, contexts: CfgRecoveryContext[]) {
-        const succ_nodes = cond_node.getGraph().getSuccessors(cond_node);
+        const succ_nodes = this.graph.getSuccessors(cond_node);
         assert.ok(succ_nodes.length === 2);
 
         this.markEdgeAsVisited(cond_node, succ_nodes[0]);
@@ -1811,6 +1880,8 @@ class InequalityPredicateAnalyser {
                 default:
                     throw new Error(`Not implemented: ${generator.default(ast).code}`);
             }
+        } else if (types.isSequenceExpression(ast)) {
+            return ast.expressions.every(e => this.isAnalysable(e));
         } else if (types.isUpdateExpression(ast)) {
             return true;
         } else if (types.isMemberExpression(ast)) {
@@ -2399,7 +2470,10 @@ class InequalityPredicateAnalyser {
 function main() {
     const args_parser = new argparse.ArgumentParser();
 
-    args_parser.add_argument('--line', { help: 'the line number of flatted for loop', required: true, type: 'int' });
+    args_parser.add_argument('--line', { help: 'the line number of flatted for loop', type: 'int', required: true });
+    args_parser.add_argument('--bogus-fork-opt', { help: 'enable bogus fork optimization', action: 'store_true', default: false });
+    args_parser.add_argument('--empty-block-opt', { help: 'eliminate empty blocks', action: 'store_true', default: false });
+    args_parser.add_argument('--dot', { help: 'output cfg dot file', type: 'str', required: false });
     args_parser.add_argument('INFILE', { help: 'obfuscated js file path' });
     args_parser.add_argument('OUTFILE', { help: 'deobfuscated js file path' });
 
@@ -2480,7 +2554,7 @@ function main() {
                     console.log(`[*] number of forks: ${graph.deflat_blocks.filter(b => b.fork_path != null).length}`);
                     console.log(`[*] number of empty block: ${graph.deflat_blocks.filter(b => b.paths.length === 0 && b.fork_path == null).length}`);
 
-                    while (true) {
+                    while (args.bogus_fork_opt) {
                         let count = graph.optimizeBogusFork();
                         console.log(`[*] optimized ${count} bogus fork(s)`);
                         if (count === 0) {
@@ -2494,7 +2568,7 @@ function main() {
                             break;
                         }
                     }
-                    {
+                    if (args.empty_block_opt) {
                         let count = graph.optimizeEmptyBlock();
                         console.log(`[*] optimized ${count} empty block(s)`);
                     }
@@ -2515,7 +2589,7 @@ function main() {
                     //     stream.write(`------------------------------\n`);
                     // });
                     // stream.end();
-
+                    //
                     // let stream2 = fs.createWriteStream(`fork2-${graph.for_statement.node.loc!.start.line}.txt`);
                     // stream2.on('error', err => console.log(`An error occured while writing to the file. Error: ${err.message}`));
                     // stream2.on('finish', () => console.log(`done: ${stream2.path}`));
@@ -2526,15 +2600,17 @@ function main() {
                     // });
                     // stream2.end();
 
-                    // let stream3 = fs.createWriteStream(`cfg-${graph.for_statement.node.loc!.start.line}.txt`);
-                    // stream3.on('error', err => console.log(`An error occured while writing to the file. Error: ${err.message}`));
-                    // stream3.on('finish', () => console.log(`done: ${stream3.path}`));
-                    // stream3.write('digraph G {\n');
-                    // graph.deflat_blocks.forEach(b => {
-                    //     graph.getSuccessors(b).forEach(next_b => stream3.write(`${graph.deflat_blocks.indexOf(b)} -> ${graph.deflat_blocks.indexOf(next_b)}\n`));
-                    // });
-                    // stream3.write('}\n');
-                    // stream3.end();
+                    if (args.dot != null) {
+                        let stream3 = fs.createWriteStream(args.dot);
+                        stream3.on('error', err => console.log(`An error occured while writing to the file. Error: ${err.message}`));
+                        stream3.on('finish', () => console.log(`done: ${stream3.path}`));
+                        stream3.write('digraph G {\n');
+                        graph.deflat_blocks.forEach(b => {
+                            graph.getSuccessors(b).forEach(next_b => stream3.write(`${graph.deflat_blocks.indexOf(b)} -> ${graph.deflat_blocks.indexOf(next_b)}\n`));
+                        });
+                        stream3.write('}\n');
+                        stream3.end();
+                    }
 
                     const deobfuscated_ast = graph.generateAst();
                     path.replaceWithMultiple(deobfuscated_ast);
